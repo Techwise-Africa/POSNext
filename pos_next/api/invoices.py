@@ -815,8 +815,29 @@ def update_invoice(data):
 
         invoice_doc.disable_rounded_total = disable_rounded
 
-        # Populate missing fields (company, currency, accounts, etc.)
-        invoice_doc.set_missing_values()
+        # ========================================================================
+        # POPULATE MISSING FIELDS — using for_validate=True intentionally
+        # ========================================================================
+        # ERPNext's set_missing_values() calls set_pos_fields() internally.
+        #
+        # With for_validate=False (the default):
+        #   set_pos_fields() -> update_multi_mode_option() which does:
+        #     1. doc.set("payments", [])          — wipes ALL payment rows
+        #     2. Rebuilds payments from POS Profile template with amount=0
+        #   Result: frontend payment amounts are destroyed before the invoice
+        #   is saved, causing invoices to post as unpaid (outstanding = grand_total).
+        #
+        # With for_validate=True:
+        #   set_pos_fields() skips update_multi_mode_option() entirely,
+        #   and only fills in missing fields (debit_to, currency, write_off_account,
+        #   cost_center, etc.) without overwriting values already set.
+        #   Payment accounts are set separately in the loop below.
+        #
+        # This matches what ERPNext itself does during validate, and POS Next
+        # already sets the fields that for_validate=True skips
+        # (ignore_pricing_rule, customer, update_stock).
+        # ========================================================================
+        invoice_doc.set_missing_values(for_validate=True)
 
         # Calculate totals and apply discounts (with rounding disabled)
         invoice_doc.calculate_taxes_and_totals()
