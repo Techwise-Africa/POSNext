@@ -1,0 +1,207 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:rule_name",
+ "creation": "2026-10-07 10:00:00.000000",
+ "description": "Reads the item code and an encoded weight or price from scale / label-printer barcodes.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "rule_name",
+  "barcode_type",
+  "column_break_main",
+  "enabled",
+  "uom",
+  "section_break_layout",
+  "barcode_length",
+  "prefix",
+  "validate_check_digit",
+  "column_break_item_code",
+  "item_code_start",
+  "item_code_length",
+  "column_break_value",
+  "value_start",
+  "value_length",
+  "value_decimals",
+  "section_break_preview",
+  "layout_preview"
+ ],
+ "fields": [
+  {
+   "fieldname": "rule_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Rule Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "default": "Weighted",
+   "description": "Weighted: the barcode carries a quantity (e.g. weight). Priced: the barcode carries the line total.",
+   "fieldname": "barcode_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Barcode Type",
+   "options": "Weighted\nPriced",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_main",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enabled"
+  },
+  {
+   "description": "Weighted: the unit of the encoded quantity (e.g. Kg). Priced: optional, used only when the item has a price for this UOM. Leave empty to use the item's UOM.",
+   "fieldname": "uom",
+   "fieldtype": "Link",
+   "label": "UOM",
+   "options": "UOM"
+  },
+  {
+   "description": "Positions are counted from 1 at the left of the barcode.",
+   "fieldname": "section_break_layout",
+   "fieldtype": "Section Break",
+   "label": "Barcode Layout"
+  },
+  {
+   "default": "13",
+   "fieldname": "barcode_length",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Barcode Length",
+   "non_negative": 1,
+   "reqd": 1
+  },
+  {
+   "description": "Barcodes must start with this value, e.g. 20.",
+   "fieldname": "prefix",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Prefix",
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "description": "Reject scans whose last digit is not a valid EAN-13 / GS1 check digit.",
+   "fieldname": "validate_check_digit",
+   "fieldtype": "Check",
+   "label": "Last Digit Is a Check Digit (EAN-13)"
+  },
+  {
+   "fieldname": "column_break_item_code",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "3",
+   "description": "Matched against Item Barcodes, then Item Codes.",
+   "fieldname": "item_code_start",
+   "fieldtype": "Int",
+   "label": "Item Code Start",
+   "non_negative": 1,
+   "reqd": 1
+  },
+  {
+   "default": "5",
+   "fieldname": "item_code_length",
+   "fieldtype": "Int",
+   "label": "Item Code Length",
+   "non_negative": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_value",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "8",
+   "fieldname": "value_start",
+   "fieldtype": "Int",
+   "label": "Value Start",
+   "non_negative": 1,
+   "reqd": 1
+  },
+  {
+   "default": "5",
+   "fieldname": "value_length",
+   "fieldtype": "Int",
+   "label": "Value Length",
+   "non_negative": 1,
+   "reqd": 1
+  },
+  {
+   "default": "3",
+   "description": "Digits after the implied decimal point. 01250 with 3 decimals reads as 1.250.",
+   "fieldname": "value_decimals",
+   "fieldtype": "Int",
+   "label": "Value Decimals",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "section_break_preview",
+   "fieldtype": "Section Break",
+   "label": "Preview"
+  },
+  {
+   "fieldname": "layout_preview",
+   "fieldtype": "HTML",
+   "label": "Layout Preview"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-10-07 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "POS Next",
+ "name": "POS Barcode Rule",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Nexus POS Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "rule_name"
+}

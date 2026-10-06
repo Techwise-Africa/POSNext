@@ -2013,14 +2013,21 @@ async function handleShiftClosed() {
 }
 
 function handleItemSelected(item, autoAdd = false) {
+	// A scanned weighted/priced label already carries its qty, UOM and price:
+	// add it straight away as a read-only line, even without auto-add.
+	const isResolvedScan = Boolean(
+		item.resolved_qty && item.resolved_barcode_type && !item.has_variants
+	);
+
 	// Auto-add mode
-	if (autoAdd) {
+	if (autoAdd || isResolvedScan) {
 		try {
 			// Check if item has resolved barcode data (weighted/priced)
 			if (item.resolved_qty && item.resolved_barcode_type) {
-				// Get the unit price for the resolved UOM from uom_prices, or fall back to item rate
+				// Get the unit price for the resolved UOM from uom_prices, or fall back to item rate.
+				// POS Barcode Rule scans send the line rate (pinned to the label for priced barcodes).
 				const resolvedUom = item.resolved_uom || item.uom;
-				const unitRate = item.uom_prices?.[resolvedUom] || item.rate;
+				const unitRate = item.resolved_rate ?? (item.uom_prices?.[resolvedUom] || item.rate);
 
 				const resolvedItem = {
 					...item,
@@ -2029,6 +2036,9 @@ function handleItemSelected(item, autoAdd = false) {
 					price_list_rate: unitRate,
 					is_resolved_barcode: true, // Mark as readonly
 				};
+				if (item.resolved_conversion_factor) {
+					resolvedItem.conversion_factor = item.resolved_conversion_factor;
+				}
 				cartStore.addItem(
 					resolvedItem,
 					item.resolved_qty,

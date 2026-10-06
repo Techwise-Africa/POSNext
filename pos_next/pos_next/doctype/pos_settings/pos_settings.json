@@ -74,6 +74,9 @@
   "enable_session_lock",
   "session_lock_timeout",
   "barcode_tab",
+  "pos_barcode_rules",
+  "test_barcode",
+  "section_break_barcode_resolver",
   "barcode_rules"
  ],
  "fields": [
@@ -550,15 +553,34 @@
    "label": "Barcode"
   },
   {
-   "fieldname": "barcode_rules",
+   "description": "Weighted and priced barcode rules for this POS Profile. They are tried in this order; the first match wins.",
+   "fieldname": "pos_barcode_rules",
    "fieldtype": "Table",
    "label": "Barcode Rules",
+   "options": "POS Settings Barcode Rule"
+  },
+  {
+   "fieldname": "test_barcode",
+   "fieldtype": "Button",
+   "label": "Test Barcode"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_break_barcode_resolver",
+   "fieldtype": "Section Break",
+   "label": "barcode_resolver App"
+  },
+  {
+   "description": "Rules of the optional barcode_resolver app. Only tried when that app is installed and no Barcode Rule above matches.",
+   "fieldname": "barcode_rules",
+   "fieldtype": "Table",
+   "label": "barcode_resolver Rules (Legacy)",
    "options": "POS Barcode Rules"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-06-03 15:54:09.903964",
+ "modified": "2026-10-07 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",

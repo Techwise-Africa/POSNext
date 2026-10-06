@@ -5,7 +5,8 @@ import { isOffline, getCachedItem } from "@/utils/offline";
 import { useSerialNumberStore } from "@/stores/serialNumber";
 import { CoalescingMutex } from "@/utils/mutex";
 import { logger } from "@/utils/logger";
-import { roundCurrency } from "@/utils/currency";
+import { getPrecision, roundCurrency } from "@/utils/currency";
+import { pinPricedLine } from "@/utils/barcodeParser";
 
 const log = logger.create("Invoice");
 
@@ -220,6 +221,33 @@ export function useInvoice() {
 		);
 	});
 
+	/**
+	 * Merging a weighted/priced barcode scan into a line makes the line
+	 * read-only. Repeat priced labels re-pin qty/rate so the line total stays
+	 * the sum of the labels. Call after the quantity has been added.
+	 */
+	function mergeResolvedScan(line, item) {
+		const pricedLine = line.is_resolved_barcode && line.resolved_amount != null;
+		if (!item.is_resolved_barcode) {
+			// Hand-added qty: the line is no longer just labels
+			line.resolved_amount = null;
+			return;
+		}
+
+		line.is_resolved_barcode = true;
+		if (pricedLine && item.resolved_amount != null && item.resolved_unit_rate > 0) {
+			const { float, currency } = getPrecision();
+			const total = line.resolved_amount + item.resolved_amount;
+			const { qty, rate } = pinPricedLine(total, item.resolved_unit_rate, float, currency);
+			line.quantity = qty;
+			line.rate = rate;
+			line.price_list_rate = rate;
+			line.resolved_amount = total;
+		} else {
+			line.resolved_amount = null;
+		}
+	}
+
 	// Actions
 	function addItem(item, quantity = 1) {
 		const itemUom = item.uom || item.stock_uom;
@@ -253,6 +281,7 @@ export function useInvoice() {
 			} else {
 				existingItem.quantity += quantity;
 			}
+			mergeResolvedScan(existingItem, item);
 			recalculateItem(existingItem);
 
 			// Update cache incrementally (new values - old values)
@@ -290,6 +319,9 @@ export function useInvoice() {
 				brand: item.brand,
 				// Resolved barcode flag - prevents editing qty/uom/rate for weighted/priced barcodes
 				is_resolved_barcode: item.is_resolved_barcode || false,
+				// Label total of a priced barcode line (POS Barcode Rule), kept so
+				// repeat scans still add up to the labels
+				resolved_amount: item.is_resolved_barcode ? (item.resolved_amount ?? null) : null,
 				// Stock validation fields — needed for qty increase checks in cart
 				// Prefer Bin qty (original_stock). Grid actual_qty is remaining after cart reserve.
 				actual_qty: item.original_stock ?? item.actual_qty ?? 0,

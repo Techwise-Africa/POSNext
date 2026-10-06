@@ -1,5 +1,12 @@
 import { call } from "@/utils/apiWrapper";
-import { isOffline } from "@/utils/offline";
+import {
+	BarcodeResolutionError,
+	computeResolvedLine,
+	parseBarcode,
+	stripResolvedFields,
+} from "@/utils/barcodeParser";
+import { getPrecision } from "@/utils/currency";
+import { getSetting, isOffline, setSetting } from "@/utils/offline";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { updateItemBatchSerialData } from "@/utils/offline/items";
 import { performanceConfig } from "@/utils/performanceConfig";
@@ -1772,8 +1779,9 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 						setSearchResults(serverResults);
 						log.success(`Found ${serverResults.length} items on server`);
 
-						// Cache server results for future searches
-						await offlineWorker.cacheItems(serverResults);
+						// Cache server results for future searches. A barcode search
+						// resolves the first result's weight/price; don't cache that scan.
+						await offlineWorker.cacheItems(serverResults.map(stripResolvedFields));
 
 						// If we didn't resolve with cache, resolve with server results
 						if (!cached || cached.length === 0) {
@@ -1829,17 +1837,156 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 				throw new Error("POS Profile not set");
 			}
 
+			// Offline: weighted/priced labels can still be read with the cached rules
+			if (isOffline()) {
+				const local = await resolveBarcodeLocally(barcode);
+				if (local) return local;
+			}
+
 			log.debug("Calling searchByBarcode API", { posProfile: posProfile.value });
 
-			const result = await searchByBarcodeResource.submit({
-				barcode: barcode,
-				pos_profile: posProfile.value,
-			});
+			try {
+				const result = await searchByBarcodeResource.submit({
+					barcode: barcode,
+					pos_profile: posProfile.value,
+				});
 
-			const item = result?.message || result;
-			return item;
+				const item = result?.message || result;
+				return item;
+			} catch (error) {
+				// No server answer (connection dropped): try the cached rules
+				if (!error?.exc_type) {
+					const local = await resolveBarcodeLocally(barcode);
+					if (local) return local;
+				}
+				throw error;
+			}
 		} catch (error) {
 			log.error("Store searchByBarcode error", error);
+			throw error;
+		}
+	}
+
+	// ========================================================================
+	// POS BARCODE RULES (weighted / priced labels)
+	// ========================================================================
+	// Rules come from pos_next.api.items.get_barcode_rules and are kept in
+	// IndexedDB per profile so scans resolve offline with the same parser as
+	// the server (utils/barcodeParser.js). Online scans are still resolved by
+	// the server; with no rules configured nothing here changes a scan.
+
+	/** @type {{ rules: Object[], uom_conversions: Object } | null} */
+	let barcodeRules = null;
+	let barcodeRulesProfile = null;
+
+	async function loadBarcodeRules(profile) {
+		if (!profile) return null;
+		const key = `barcode_rules:${profile}`;
+		try {
+			if (!isOffline()) {
+				const response = await call("pos_next.api.items.get_barcode_rules", {
+					pos_profile: profile,
+				});
+				barcodeRules = response?.message || response || null;
+				barcodeRulesProfile = profile;
+				await setSetting(key, barcodeRules);
+				return barcodeRules;
+			}
+		} catch (error) {
+			log.warn("Could not fetch barcode rules, using the cached copy", error);
+		}
+		barcodeRules = await getSetting(key, null);
+		barcodeRulesProfile = profile;
+		return barcodeRules;
+	}
+
+	/** Cached item whose code or one of whose barcodes is exactly `code`. */
+	async function findCachedItemByBarcode(code) {
+		const candidates = await offlineWorker.searchCachedItems(code, 20);
+		return (
+			(candidates || []).find(
+				(item) =>
+					item.item_code === code ||
+					(item.barcodes || []).some((barcode) => String(barcode).split(",").includes(code))
+			) || null
+		);
+	}
+
+	function barcodeErrorMessage(code, params) {
+		switch (code) {
+			case "invalid_check_digit":
+				return __("Invalid check digit in barcode {0}. Rescan the label.", [params.barcode]);
+			case "item_not_found":
+				return __("No item found for code {0} in barcode {1} (rule {2}).", [
+					params.item_barcode,
+					params.barcode,
+					params.rule,
+				]);
+			case "missing_price":
+				return __("Item {0} has no selling price for UOM {1}.", [params.item_code, params.uom]);
+			case "uom_not_convertible":
+				return __("Item {0} has no conversion factor for UOM {1}.", [params.item_code, params.uom]);
+			case "zero_value":
+				return __("Barcode {0} encodes a zero weight or price.", [params.barcode]);
+			case "value_too_small":
+				return __("The weight or price in barcode {0} is too small to sell.", [params.barcode]);
+			default:
+				return __("Barcode {0} could not be read ({1}).", [params.barcode, code]);
+		}
+	}
+
+	/** Same shape as the server's BarcodeRuleError, so the scan handler shows it. */
+	function barcodeRuleError(error, barcode) {
+		const wrapped = new Error(barcodeErrorMessage(error.code, { barcode, ...error.params }));
+		wrapped.exc_type = "BarcodeRuleError";
+		return wrapped;
+	}
+
+	/**
+	 * Read a weighted/priced barcode from cached rules and items.
+	 * Mirrors pos_next.api.items._search_by_barcode for POS Barcode Rules.
+	 * @returns {Promise<Object|null>} Item with resolved_* fields, or null when no rule fits
+	 * @throws {Error} exc_type "BarcodeRuleError" when a rule fits but the scan can't be sold
+	 */
+	async function resolveBarcodeLocally(barcode) {
+		if (barcodeRulesProfile !== posProfile.value) {
+			await loadBarcodeRules(posProfile.value);
+		}
+		const parsed = parseBarcode(barcode, barcodeRules?.rules);
+		if (!parsed) return null;
+
+		// A store's own barcode can share a rule's prefix; an exact match wins
+		// when the rule can't be applied.
+		const code = String(barcode).trim();
+		if (parsed.check_digit_valid === false) {
+			const exact = await findCachedItemByBarcode(code);
+			if (exact) return stripResolvedFields(exact);
+			throw barcodeRuleError(new BarcodeResolutionError("invalid_check_digit"), code);
+		}
+
+		const item = await findCachedItemByBarcode(parsed.item_barcode);
+		if (!item) {
+			const exact = await findCachedItemByBarcode(code);
+			if (exact) return stripResolvedFields(exact);
+			throw barcodeRuleError(
+				new BarcodeResolutionError("item_not_found", {
+					item_barcode: parsed.item_barcode,
+					rule: parsed.rule,
+				}),
+				code
+			);
+		}
+
+		const { float: qtyPrecision, currency: currencyPrecision } = getPrecision();
+		try {
+			const resolved = computeResolvedLine(parsed, item, {
+				uomConversions: barcodeRules.uom_conversions,
+				qtyPrecision,
+				currencyPrecision,
+			});
+			return { ...stripResolvedFields(item), ...resolved };
+		} catch (error) {
+			if (error instanceof BarcodeResolutionError) throw barcodeRuleError(error, code);
 			throw error;
 		}
 	}
@@ -2237,6 +2384,11 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			selectedBrand.value = null;
 			return;
 		}
+
+		// Weighted/priced barcode rules for offline scans (non-blocking)
+		loadBarcodeRules(profile).catch((error) => {
+			log.warn("Could not load barcode rules", error);
+		});
 
 		try {
 			// Single API call returns EVERYTHING - no need for separate loadItemGroups()

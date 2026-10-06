@@ -33,6 +33,20 @@ class POSSettings(Document):
 					"Please disable Partial Payment first."
 				)
 
+		self.validate_barcode_rules()
+
+	def validate_barcode_rules(self):
+		"""Each POS Barcode Rule may appear once; order decides which rule wins."""
+		from frappe import _
+
+		seen = set()
+		for row in self.get("pos_barcode_rules") or []:
+			if row.barcode_rule in seen:
+				frappe.throw(
+					_("Row #{0}: Barcode Rule {1} is already in the table.").format(row.idx, row.barcode_rule)
+				)
+			seen.add(row.barcode_rule)
+
 	def on_update(self):
 		"""Sync allow_negative_stock with Stock Settings"""
 		self.sync_negative_stock_setting()
@@ -168,3 +182,13 @@ def update_pos_settings(pos_profile, settings):
 		doc.insert()
 
 	return doc.as_dict()
+
+
+@frappe.whitelist()
+def test_barcode(pos_profile, barcode):
+	"""Show how the POS reads a barcode with the saved rules (Test Barcode button)."""
+	frappe.has_permission("POS Settings", "read", throw=True)
+
+	from pos_next.api.items import explain_barcode
+
+	return explain_barcode(barcode, pos_profile)

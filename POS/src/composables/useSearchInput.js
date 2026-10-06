@@ -155,6 +155,13 @@ export function useSearchInput({ itemStore, onItemFound, showWarning, isAnyDialo
 					return;
 				}
 			} catch (error) {
+				// A weighted/priced barcode rule matched but the scan can't be
+				// sold (bad check digit, unknown item, no price): say why.
+				if (error?.exc_type === "BarcodeRuleError") {
+					showWarning(barcodeRuleMessage(error));
+					focusSearchInput();
+					return;
+				}
 				console.error("Barcode API error:", error);
 			}
 
@@ -165,6 +172,13 @@ export function useSearchInput({ itemStore, onItemFound, showWarning, isAnyDialo
 			showWarning(__("Item Not Found: No item found with barcode: {0}", [barcode]));
 			focusSearchInput();
 		});
+	}
+
+	/** Message of a BarcodeRuleError from the server (messages[]) or the offline parser. */
+	function barcodeRuleMessage(error) {
+		const serverMessage = error.messages?.[0];
+		const text = serverMessage?.message ?? serverMessage ?? error.message;
+		return String(text).replace(/<[^>]*>/g, "");
 	}
 
 	// ---- Toggles ----

@@ -348,6 +348,46 @@ Display prices in proper local format:
 - **Write-off**: Small change amounts
 - **Silent Print**: Auto-print receipts
 
+### Weighted & Priced Barcodes
+
+Scale and label-printer barcodes carry an item code plus a weight (**Weighted**) or a line total (**Priced**). POS Next reads them natively, online and offline, without the `barcode_resolver` app.
+
+1. Create a **POS Barcode Rule** that describes the layout. Positions count from 1 at the left.
+2. Open **POS Settings** for the POS Profile → **Barcode** tab → add the rule to **Barcode Rules**. Rules are tried top to bottom; the first match wins.
+3. Click **Test Barcode** and scan a label to check what the POS will add.
+
+**Example:** prefix `20`, 5-digit item code, 5-digit weight in grams, EAN-13 check digit:
+
+```
+20 12345 01250 9
+│  │     │     └ check digit (EAN-13)
+│  │     └ weight: 01250 g = 1.250 Kg
+│  └ item code
+└ prefix
+```
+
+| Field | Value |
+|-------|-------|
+| Barcode Type | Weighted |
+| Barcode Length | 13 |
+| Prefix | 20 |
+| Item Code Start / Length | 3 / 5 |
+| Value Start / Length | 8 / 5 |
+| Value Decimals | 3 (grams → Kg) |
+| UOM | Kg |
+| Last Digit Is a Check Digit | ✓ |
+
+Scanning `2012345012509` adds the item whose **Item Barcode** (or Item Code) is `12345` with qty **1.250 Kg** at its Kg price. To keep the line in grams instead, set Value Decimals to `0` and UOM to `Gram`. If the item is stocked in Kg, the weight is converted using the item's UOM conversions or the global UOM Conversion Factor.
+
+How scans are handled:
+- **Weighted**: qty = encoded value; rate = the item's price for that UOM.
+- **Priced**: qty = encoded total ÷ unit price. If rounding qty to the system float precision would change the total, the rate is adjusted by a fraction so the line still matches the label.
+- Resolved lines are read-only in the cart. Scanning the same item again adds to that line.
+- The POS reports a clear error for a bad check digit, an item code with no matching item, or an item with no selling price, and doesn't add the line.
+- A barcode that is an exact Item Barcode still works, even if it fits a rule's prefix and length.
+- Rules are cached on the device, so labels resolve offline from the cached items. Rule changes are picked up the next time the POS loads.
+- With no POS Barcode Rules configured, scanning works exactly as before. If the `barcode_resolver` app is installed, its rules are tried after POS Next's rules.
+
 ## 🛠️ Troubleshooting
 
 ### Items Not Loading

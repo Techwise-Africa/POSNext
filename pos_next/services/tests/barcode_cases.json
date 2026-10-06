@@ -1,0 +1,468 @@
+{
+	"_comment": "Shared by pos_next/services/tests/test_barcode_parser.py and POS/src/utils/__tests__/barcodeParser.spec.js. Expected objects are subsets: only the keys listed are compared, numbers within 1e-9. Change both parsers together.",
+	"rules": {
+		"weighted_kg": {
+			"name": "Weighted Kg",
+			"barcode_type": "Weighted",
+			"barcode_length": 13,
+			"prefix": "20",
+			"item_code_start": 3,
+			"item_code_length": 5,
+			"value_start": 8,
+			"value_length": 5,
+			"value_decimals": 3,
+			"uom": "Kg",
+			"validate_check_digit": 1
+		},
+		"weighted_kg_no_check": {
+			"name": "Weighted Kg (no check)",
+			"barcode_type": "Weighted",
+			"barcode_length": 13,
+			"prefix": "20",
+			"item_code_start": 3,
+			"item_code_length": 5,
+			"value_start": 8,
+			"value_length": 5,
+			"value_decimals": 3,
+			"uom": "Kg",
+			"validate_check_digit": 0
+		},
+		"weighted_gram": {
+			"name": "Weighted Gram",
+			"barcode_type": "Weighted",
+			"barcode_length": 13,
+			"prefix": "21",
+			"item_code_start": 3,
+			"item_code_length": 5,
+			"value_start": 8,
+			"value_length": 5,
+			"value_decimals": 0,
+			"uom": "Gram",
+			"validate_check_digit": 1
+		},
+		"weighted_short": {
+			"name": "Weighted 12 digit",
+			"barcode_type": "Weighted",
+			"barcode_length": 12,
+			"prefix": "99",
+			"item_code_start": 3,
+			"item_code_length": 4,
+			"value_start": 7,
+			"value_length": 6,
+			"value_decimals": 3,
+			"uom": "Kg",
+			"validate_check_digit": 0
+		},
+		"priced": {
+			"name": "Priced",
+			"barcode_type": "Priced",
+			"barcode_length": 13,
+			"prefix": "22",
+			"item_code_start": 3,
+			"item_code_length": 5,
+			"value_start": 8,
+			"value_length": 5,
+			"value_decimals": 2,
+			"uom": null,
+			"validate_check_digit": 1
+		},
+		"broken_overlap": {
+			"name": "Broken (overlapping)",
+			"barcode_type": "Weighted",
+			"barcode_length": 13,
+			"prefix": "20",
+			"item_code_start": 2,
+			"item_code_length": 5,
+			"value_start": 8,
+			"value_length": 5,
+			"value_decimals": 3,
+			"uom": "Kg",
+			"validate_check_digit": 1
+		}
+	},
+	"check_digit": [
+		{ "digits": "201234501250", "check": 9 },
+		{ "digits": "400638133393", "check": 1 },
+		{ "digits": "9638507", "check": 4 },
+		{ "digits": "03600029145", "check": 2 },
+		{ "digits": "225432101299", "check": 2 }
+	],
+	"valid_check_digit": [
+		{ "barcode": "2012345012509", "valid": true },
+		{ "barcode": "2012345012508", "valid": false },
+		{ "barcode": "4006381333931", "valid": true },
+		{ "barcode": "96385074", "valid": true },
+		{ "barcode": "036000291452", "valid": true },
+		{ "barcode": "20123450125A9", "valid": false },
+		{ "barcode": "", "valid": false }
+	],
+	"rule_problems": [
+		{ "name": "valid weighted rule", "rule": "weighted_kg", "problems": [] },
+		{ "name": "valid priced rule", "rule": "priced", "problems": [] },
+		{ "name": "item code overlaps prefix", "rule": "broken_overlap", "problems": ["segments_overlap"] },
+		{
+			"name": "barcode too short",
+			"rule": "weighted_kg",
+			"override": { "barcode_length": 3 },
+			"problems": ["barcode_length"]
+		},
+		{
+			"name": "missing prefix",
+			"rule": "weighted_kg",
+			"override": { "prefix": "" },
+			"problems": ["prefix_missing"]
+		},
+		{
+			"name": "prefix as long as the barcode",
+			"rule": "weighted_kg",
+			"override": { "prefix": "2012345012509" },
+			"problems": ["prefix_too_long", "segments_overlap"]
+		},
+		{
+			"name": "letters in prefix with check digit",
+			"rule": "weighted_kg",
+			"override": { "prefix": "2A" },
+			"problems": ["prefix_not_numeric"]
+		},
+		{
+			"name": "letters in prefix without check digit are fine",
+			"rule": "weighted_kg_no_check",
+			"override": { "prefix": "2A" },
+			"problems": []
+		},
+		{
+			"name": "value runs past the end",
+			"rule": "weighted_kg",
+			"override": { "value_start": 9, "value_length": 6 },
+			"problems": ["value_out_of_range"]
+		},
+		{
+			"name": "value covers the check digit",
+			"rule": "weighted_kg",
+			"override": { "value_start": 9 },
+			"problems": ["segments_overlap"]
+		},
+		{
+			"name": "value may use the last digit without a check digit",
+			"rule": "weighted_kg_no_check",
+			"override": { "value_start": 9 },
+			"problems": []
+		},
+		{
+			"name": "item code length zero",
+			"rule": "weighted_kg",
+			"override": { "item_code_length": 0 },
+			"problems": ["item_code_out_of_range"]
+		},
+		{
+			"name": "more decimals than value digits",
+			"rule": "weighted_kg",
+			"override": { "value_decimals": 6 },
+			"problems": ["value_decimals"]
+		},
+		{
+			"name": "unknown barcode type",
+			"rule": "weighted_kg",
+			"override": { "barcode_type": "Counted" },
+			"problems": ["barcode_type"]
+		}
+	],
+	"parse": [
+		{
+			"name": "README example: prefix 20, item 12345, 1250 g as 1.250 Kg, check digit 9",
+			"barcode": "2012345012509",
+			"rules": ["weighted_kg"],
+			"expected": {
+				"source": "pos_next",
+				"rule": "Weighted Kg",
+				"barcode_type": "Weighted",
+				"item_barcode": "12345",
+				"integer_value": "1",
+				"decimal_value": "250",
+				"uom": "Kg",
+				"qty": 1.25,
+				"check_digit_valid": true
+			}
+		},
+		{
+			"name": "surrounding whitespace is ignored",
+			"barcode": " 2012345012509\n",
+			"rules": ["weighted_kg"],
+			"expected": { "item_barcode": "12345", "qty": 1.25 }
+		},
+		{
+			"name": "bad check digit is reported, not silently accepted",
+			"barcode": "2012345012508",
+			"rules": ["weighted_kg"],
+			"expected": { "rule": "Weighted Kg", "item_barcode": "12345", "qty": 1.25, "check_digit_valid": false }
+		},
+		{
+			"name": "bad check digit falls through to a later rule that fits",
+			"barcode": "2012345012508",
+			"rules": ["weighted_kg", "weighted_kg_no_check"],
+			"expected": { "rule": "Weighted Kg (no check)", "qty": 1.25, "check_digit_valid": null }
+		},
+		{
+			"name": "wrong length does not match",
+			"barcode": "201234501250",
+			"rules": ["weighted_kg"],
+			"expected": null
+		},
+		{
+			"name": "wrong prefix does not match",
+			"barcode": "4006381333931",
+			"rules": ["weighted_kg", "priced"],
+			"expected": null
+		},
+		{
+			"name": "non-digit value does not match",
+			"barcode": "20123450125A9",
+			"rules": ["weighted_kg"],
+			"expected": null
+		},
+		{
+			"name": "empty barcode",
+			"barcode": "",
+			"rules": ["weighted_kg"],
+			"expected": null
+		},
+		{
+			"name": "no rules",
+			"barcode": "2012345012509",
+			"rules": [],
+			"expected": null
+		},
+		{
+			"name": "rules are tried in order (priced barcode)",
+			"barcode": "2254321012992",
+			"rules": ["weighted_kg", "priced"],
+			"expected": {
+				"rule": "Priced",
+				"barcode_type": "Priced",
+				"item_barcode": "54321",
+				"integer_value": "12",
+				"decimal_value": "99",
+				"price": 12.99,
+				"uom": null,
+				"check_digit_valid": true
+			}
+		},
+		{
+			"name": "invalid rule definitions are skipped",
+			"barcode": "2012345012509",
+			"rules": ["broken_overlap", "weighted_kg"],
+			"expected": { "rule": "Weighted Kg", "item_barcode": "12345" }
+		},
+		{
+			"name": "no decimals: 1250 Gram",
+			"barcode": "2112345012506",
+			"rules": ["weighted_gram"],
+			"expected": { "item_barcode": "12345", "integer_value": "1250", "decimal_value": "", "qty": 1250, "uom": "Gram" }
+		},
+		{
+			"name": "12-digit rule without check digit",
+			"barcode": "991234001500",
+			"rules": ["weighted_short"],
+			"expected": { "item_barcode": "1234", "qty": 1.5, "check_digit_valid": null }
+		},
+		{
+			"name": "item code keeps leading zeros",
+			"barcode": "2000042005009",
+			"rules": ["weighted_kg"],
+			"expected": { "item_barcode": "00042", "integer_value": "0", "decimal_value": "500", "qty": 0.5 }
+		},
+		{
+			"name": "zero weight still parses (compute rejects it)",
+			"barcode": "2012345000001",
+			"rules": ["weighted_kg"],
+			"expected": { "item_barcode": "12345", "qty": 0, "check_digit_valid": true }
+		}
+	],
+	"compute": [
+		{
+			"name": "weighted in the item's UOM",
+			"parsed": { "rule": "Weighted Kg", "barcode_type": "Weighted", "uom": "Kg", "qty": 1.25 },
+			"item": "banana",
+			"expected": {
+				"resolved_qty": 1.25,
+				"resolved_uom": "Kg",
+				"resolved_rate": 4.5,
+				"resolved_price": 4.5,
+				"resolved_unit_rate": 4.5,
+				"resolved_conversion_factor": 1,
+				"resolved_barcode_type": "Weighted",
+				"resolved_rule": "Weighted Kg"
+			}
+		},
+		{
+			"name": "weighted without a rule UOM uses the item's UOM",
+			"parsed": { "rule": "Weighted", "barcode_type": "Weighted", "uom": null, "qty": 0.75 },
+			"item": "banana",
+			"expected": { "resolved_qty": 0.75, "resolved_uom": "Kg", "resolved_rate": 4.5 }
+		},
+		{
+			"name": "grams converted to the item's Kg with a global UOM conversion",
+			"parsed": { "rule": "Weighted Gram", "barcode_type": "Weighted", "uom": "Gram", "qty": 1250 },
+			"item": "banana",
+			"uom_conversions": { "Gram": { "Kg": 0.001 } },
+			"expected": { "resolved_qty": 1.25, "resolved_uom": "Kg", "resolved_rate": 4.5, "resolved_conversion_factor": 1 }
+		},
+		{
+			"name": "grams converted with the item's own UOM row",
+			"parsed": { "rule": "Weighted Gram", "barcode_type": "Weighted", "uom": "Gram", "qty": 1250 },
+			"item": "banana_with_gram",
+			"expected": { "resolved_qty": 1.25, "resolved_uom": "Kg", "resolved_rate": 4.5 }
+		},
+		{
+			"name": "item priced per Gram is sold in Gram",
+			"parsed": { "rule": "Weighted Gram", "barcode_type": "Weighted", "uom": "Gram", "qty": 1250 },
+			"item": "banana_priced_per_gram",
+			"expected": {
+				"resolved_qty": 1250,
+				"resolved_uom": "Gram",
+				"resolved_rate": 0.005,
+				"resolved_conversion_factor": 0.001
+			}
+		},
+		{
+			"name": "weighted UOM the item can't convert",
+			"parsed": { "rule": "Weighted Gram", "barcode_type": "Weighted", "uom": "Gram", "qty": 1250 },
+			"item": "banana",
+			"error": { "code": "uom_not_convertible", "params": { "item_code": "BANANA", "uom": "Gram" } }
+		},
+		{
+			"name": "converted into a non-stock item UOM",
+			"parsed": { "rule": "Pieces", "barcode_type": "Weighted", "uom": "Nos", "qty": 6 },
+			"item": "eggs_by_box",
+			"expected": { "resolved_qty": 0.5, "resolved_uom": "Box", "resolved_rate": 24, "resolved_conversion_factor": 12 }
+		},
+		{
+			"name": "weighted item without a price",
+			"parsed": { "rule": "Weighted Kg", "barcode_type": "Weighted", "uom": "Kg", "qty": 1.25 },
+			"item": "unpriced",
+			"error": { "code": "missing_price", "params": { "item_code": "UNPRICED", "uom": "Kg" } }
+		},
+		{
+			"name": "zero weight",
+			"parsed": { "rule": "Weighted Kg", "barcode_type": "Weighted", "uom": "Kg", "qty": 0 },
+			"item": "banana",
+			"error": { "code": "zero_value" }
+		},
+		{
+			"name": "weight rounds to zero at the qty precision",
+			"parsed": { "rule": "Weighted Gram", "barcode_type": "Weighted", "uom": "Gram", "qty": 0.4 },
+			"item": "banana",
+			"uom_conversions": { "Gram": { "Kg": 0.001 } },
+			"error": { "code": "value_too_small" }
+		},
+		{
+			"name": "priced label: qty = total / unit price, rate unchanged when it already adds up",
+			"parsed": { "rule": "Priced", "barcode_type": "Priced", "uom": null, "price": 12.99 },
+			"item": "banana",
+			"expected": {
+				"resolved_qty": 2.887,
+				"resolved_uom": "Kg",
+				"resolved_rate": 4.5,
+				"resolved_unit_rate": 4.5,
+				"resolved_price": 12.99,
+				"resolved_amount": 12.99,
+				"resolved_barcode_type": "Priced"
+			}
+		},
+		{
+			"name": "priced label: rate absorbs qty rounding so the line equals the label",
+			"parsed": { "rule": "Priced", "barcode_type": "Priced", "uom": null, "price": 1234.56 },
+			"item": "saffron",
+			"expected": { "resolved_qty": 1.235, "resolved_rate": 999.64, "resolved_unit_rate": 1000, "resolved_amount": 1234.56 }
+		},
+		{
+			"name": "priced rule UOM without an item price falls back to the item's UOM",
+			"parsed": { "rule": "Priced", "barcode_type": "Priced", "uom": "Box", "price": 9 },
+			"item": "banana",
+			"expected": { "resolved_qty": 2, "resolved_uom": "Kg", "resolved_rate": 4.5 }
+		},
+		{
+			"name": "priced item without a price",
+			"parsed": { "rule": "Priced", "barcode_type": "Priced", "uom": null, "price": 12.99 },
+			"item": "unpriced",
+			"error": { "code": "missing_price", "params": { "item_code": "UNPRICED", "uom": "Kg" } }
+		},
+		{
+			"name": "priced label too small for the qty precision",
+			"parsed": { "rule": "Priced", "barcode_type": "Priced", "uom": null, "price": 0.01 },
+			"item": "saffron",
+			"error": { "code": "value_too_small" }
+		},
+		{
+			"name": "zero price",
+			"parsed": { "rule": "Priced", "barcode_type": "Priced", "uom": null, "price": 0 },
+			"item": "banana",
+			"error": { "code": "zero_value" }
+		},
+		{
+			"name": "higher qty precision keeps the unit rate",
+			"parsed": { "rule": "Priced", "barcode_type": "Priced", "uom": null, "price": 1234.56 },
+			"item": "saffron",
+			"qty_precision": 6,
+			"expected": { "resolved_qty": 1.23456, "resolved_rate": 1000 }
+		}
+	],
+	"items": {
+		"banana": {
+			"item_code": "BANANA",
+			"stock_uom": "Kg",
+			"uom": "Kg",
+			"conversion_factor": 1,
+			"price_list_rate": 4.5,
+			"rate": 4.5,
+			"uom_prices": { "Kg": 4.5 },
+			"item_uoms": []
+		},
+		"banana_with_gram": {
+			"item_code": "BANANA",
+			"stock_uom": "Kg",
+			"uom": "Kg",
+			"conversion_factor": 1,
+			"price_list_rate": 4.5,
+			"uom_prices": { "Kg": 4.5 },
+			"item_uoms": [{ "uom": "Gram", "conversion_factor": 0.001 }]
+		},
+		"banana_priced_per_gram": {
+			"item_code": "BANANA",
+			"stock_uom": "Kg",
+			"uom": "Kg",
+			"conversion_factor": 1,
+			"price_list_rate": 4.5,
+			"uom_prices": { "Kg": 4.5, "Gram": 0.005 },
+			"item_uoms": [{ "uom": "Gram", "conversion_factor": 0.001 }]
+		},
+		"eggs_by_box": {
+			"item_code": "EGGS",
+			"stock_uom": "Nos",
+			"uom": "Box",
+			"conversion_factor": 12,
+			"price_list_rate": 24,
+			"uom_prices": { "Box": 24 },
+			"item_uoms": [{ "uom": "Box", "conversion_factor": 12 }]
+		},
+		"saffron": {
+			"item_code": "SAFFRON",
+			"stock_uom": "Kg",
+			"uom": "Kg",
+			"conversion_factor": 1,
+			"price_list_rate": 1000,
+			"uom_prices": { "Kg": 1000 },
+			"item_uoms": []
+		},
+		"unpriced": {
+			"item_code": "UNPRICED",
+			"stock_uom": "Kg",
+			"uom": "Kg",
+			"conversion_factor": 1,
+			"price_list_rate": 0,
+			"uom_prices": {},
+			"item_uoms": []
+		}
+	},
+	"precision": { "qty": 3, "currency": 2 }
+}

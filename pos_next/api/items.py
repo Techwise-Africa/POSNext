@@ -367,9 +367,19 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 	return res
 
 
+def _find_item_by_barcode(barcode):
+	"""Return (item_code, barcode_uom) for an Item Barcode, else an Item Code match."""
+	barcode_data = frappe.db.get_value("Item Barcode", {"barcode": barcode}, ["parent", "uom"], as_dict=True)
+	if barcode_data:
+		return barcode_data.parent, barcode_data.uom
+	return frappe.db.get_value("Item", {"name": barcode}), None
+
+
 @frappe.whitelist()
 def search_by_barcode(barcode, pos_profile):
 	"""Search item by barcode"""
+	from pos_next.services.barcode import BarcodeResolutionError, throw_barcode_error
+
 	try:
 		# Parse pos_profile if it's a JSON string
 		if isinstance(pos_profile, str):
@@ -385,96 +395,191 @@ def search_by_barcode(barcode, pos_profile):
 		if not pos_profile:
 			frappe.throw(_("POS Profile is required"))
 
-		# Try to resolve weighted/priced barcodes if barcode_resolver is available
-		resolved_barcode_data = None
-		effective_barcode = barcode
-		from pos_next.services.barcode import resolve_barcode
-
-		resolved_barcode_data = resolve_barcode(barcode, pos_profile)
-		if resolved_barcode_data and resolved_barcode_data.get("item_barcode"):
-			effective_barcode = resolved_barcode_data["item_barcode"]
-
-		# Search for item by barcode - also get UOM if barcode has specific UOM
-		barcode_data = frappe.db.get_value(
-			"Item Barcode", {"barcode": effective_barcode}, ["parent", "uom"], as_dict=True
-		)
-
-		if barcode_data:
-			item_code = barcode_data.parent
-			barcode_uom = barcode_data.uom
-		else:
-			# Try searching in item code field directly
-			item_code = frappe.db.get_value("Item", {"name": effective_barcode})
-			barcode_uom = None
-
-		if not item_code:
-			frappe.throw(_("Item with barcode {0} not found").format(barcode))
-
-		# Get POS Profile details
-		pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
-
-		# Validate POS Profile has required fields
-		if not pos_profile_doc.warehouse:
-			frappe.throw(_("Warehouse not set in POS Profile {0}").format(pos_profile))
-		if not pos_profile_doc.selling_price_list:
-			frappe.throw(_("Selling Price List not set in POS Profile {0}").format(pos_profile))
-		if not pos_profile_doc.company:
-			frappe.throw(_("Company not set in POS Profile {0}").format(pos_profile))
-
-		# Get item doc
-		item_doc = frappe.get_cached_doc("Item", item_code)
-
-		# Check if item is allowed for sales
-		if not item_doc.is_sales_item:
-			frappe.throw(_("Item {0} is not allowed for sales").format(item_code))
-
-		# Prepare item dict for get_item_detail
-		item = {
-			"item_code": item_code,
-			"has_batch_no": item_doc.has_batch_no or 0,
-			"has_serial_no": item_doc.has_serial_no or 0,
-			"is_stock_item": item_doc.is_stock_item or 0,
-			"pos_profile": pos_profile,
-		}
-
-		# Include UOM from barcode if available
-		if barcode_uom:
-			item["uom"] = barcode_uom
-
-		# Get item details
-		item_details = get_item_detail(
-			item=json.dumps(item),
-			warehouse=pos_profile_doc.warehouse,
-			price_list=pos_profile_doc.selling_price_list,
-			company=pos_profile_doc.company,
-		)
-
-		# Ensure warehouse is set on the response (needed for cart/invoice)
-		item_details["warehouse"] = pos_profile_doc.warehouse
-
-		# Build uom_prices map (same pattern as get_items)
-		uom_prices = _fetch_item_uom_prices(
-			item_code,
-			pos_profile_doc.selling_price_list,
-		)
-
-		item_details["uom_prices"] = uom_prices
-
-		# Apply resolved barcode data (weighted/priced) to the item details
-		if resolved_barcode_data:
-			from pos_next.services.barcode import compute_resolved_item_data
-
-			resolved_item_data = compute_resolved_item_data(
-				resolved_barcode_data,
-				item=item_details,
-			)
-			if resolved_item_data:
-				item_details.update(resolved_item_data)
-
-		return item_details
+		return _search_by_barcode(barcode, pos_profile)
+	except BarcodeResolutionError as e:
+		# A POS Barcode Rule matched but the scan can't be sold: show why.
+		throw_barcode_error(e, barcode)
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Search by Barcode Error")
 		frappe.throw(_("Error searching by barcode: {0}").format(str(e)))
+
+
+def _search_by_barcode(barcode, pos_profile):
+	"""Item details for a scanned barcode, with weighted/priced data applied.
+
+	Raises BarcodeResolutionError when a POS Barcode Rule matched but the
+	scan can't become a cart line.
+	"""
+	from pos_next.services.barcode import (
+		BarcodeResolutionError,
+		is_native_result,
+		match_native_barcode,
+		resolve_barcode,
+	)
+
+	# Try to resolve weighted/priced barcodes (POS Barcode Rules, then barcode_resolver)
+	effective_barcode = barcode
+	resolved_barcode_data = resolve_barcode(barcode, pos_profile)
+	if resolved_barcode_data and resolved_barcode_data.get("item_barcode"):
+		effective_barcode = resolved_barcode_data["item_barcode"]
+
+	# Search for item by barcode - also get UOM if barcode has specific UOM
+	item_code, barcode_uom = _find_item_by_barcode(effective_barcode)
+
+	if not item_code and is_native_result(resolved_barcode_data):
+		# The rule may have caught an ordinary barcode that shares its prefix.
+		item_code, barcode_uom = _find_item_by_barcode(barcode)
+		if item_code:
+			resolved_barcode_data = None
+		else:
+			raise BarcodeResolutionError(
+				"item_not_found",
+				item_barcode=effective_barcode,
+				rule=resolved_barcode_data.get("rule"),
+			)
+
+	if not item_code:
+		native = match_native_barcode(barcode, pos_profile)
+		if native and native.get("check_digit_valid") is False:
+			raise BarcodeResolutionError("invalid_check_digit")
+
+	if not item_code:
+		frappe.throw(_("Item with barcode {0} not found").format(barcode))
+
+	# Get POS Profile details
+	pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
+
+	# Validate POS Profile has required fields
+	if not pos_profile_doc.warehouse:
+		frappe.throw(_("Warehouse not set in POS Profile {0}").format(pos_profile))
+	if not pos_profile_doc.selling_price_list:
+		frappe.throw(_("Selling Price List not set in POS Profile {0}").format(pos_profile))
+	if not pos_profile_doc.company:
+		frappe.throw(_("Company not set in POS Profile {0}").format(pos_profile))
+
+	# Get item doc
+	item_doc = frappe.get_cached_doc("Item", item_code)
+
+	# Check if item is allowed for sales
+	if not item_doc.is_sales_item:
+		frappe.throw(_("Item {0} is not allowed for sales").format(item_code))
+
+	# Prepare item dict for get_item_detail
+	item = {
+		"item_code": item_code,
+		"has_batch_no": item_doc.has_batch_no or 0,
+		"has_serial_no": item_doc.has_serial_no or 0,
+		"is_stock_item": item_doc.is_stock_item or 0,
+		"pos_profile": pos_profile,
+	}
+
+	# Include UOM from barcode if available
+	if barcode_uom:
+		item["uom"] = barcode_uom
+
+	# Get item details
+	item_details = get_item_detail(
+		item=json.dumps(item),
+		warehouse=pos_profile_doc.warehouse,
+		price_list=pos_profile_doc.selling_price_list,
+		company=pos_profile_doc.company,
+	)
+
+	# Ensure warehouse is set on the response (needed for cart/invoice)
+	item_details["warehouse"] = pos_profile_doc.warehouse
+
+	# Build uom_prices map (same pattern as get_items)
+	uom_prices = _fetch_item_uom_prices(
+		item_code,
+		pos_profile_doc.selling_price_list,
+	)
+
+	item_details["uom_prices"] = uom_prices
+
+	# Apply resolved barcode data (weighted/priced) to the item details
+	if resolved_barcode_data:
+		from pos_next.services.barcode import compute_resolved_item_data
+
+		resolved_item_data = compute_resolved_item_data(
+			resolved_barcode_data,
+			item=item_details,
+		)
+		if resolved_item_data:
+			item_details.update(resolved_item_data)
+
+	return item_details
+
+
+@frappe.whitelist()
+def get_barcode_rules(pos_profile):
+	"""POS Barcode Rules for a POS Profile, cached by the POS to read scans offline.
+
+	Returns {"rules": [...], "uom_conversions": {from_uom: {to_uom: factor}}}.
+	`rules` is empty when the profile has none, which leaves scanning as before.
+	"""
+	from pos_next.services.barcode import get_pos_barcode_rules, get_uom_conversions
+
+	rules = get_pos_barcode_rules(pos_profile)
+	return {
+		"rules": rules,
+		"uom_conversions": get_uom_conversions(rule.get("uom") for rule in rules),
+	}
+
+
+def explain_barcode(barcode, pos_profile):
+	"""Describe how the POS would read a barcode (POS Settings > Test Barcode).
+
+	Never raises for scan problems; they are returned in `error`.
+	"""
+	from pos_next.services.barcode import (
+		BarcodeResolutionError,
+		barcode_error_message,
+		match_native_barcode,
+	)
+
+	barcode = (barcode or "").strip()
+	parsed = match_native_barcode(barcode, pos_profile)
+	result = {
+		"barcode": barcode,
+		"source": "pos_next" if parsed else None,
+		"parsed": parsed,
+		"item": None,
+		"error": None,
+	}
+
+	try:
+		details = _search_by_barcode(barcode, pos_profile)
+	except BarcodeResolutionError as e:
+		result["error"] = barcode_error_message(e.code, {"barcode": barcode, **e.params})
+		return result
+	except Exception as e:
+		# Don't pop up the messages search_by_barcode queued; show them in the dialog.
+		frappe.clear_messages()
+		result["error"] = str(e)
+		return result
+
+	if not result["source"] and details.get("resolved_barcode_type"):
+		result["source"] = "barcode_resolver"
+	if result["source"] == "pos_next" and not details.get("resolved_barcode_type"):
+		# The rule matched, but the full barcode is an ordinary Item Barcode.
+		result["source"] = None
+
+	result["item"] = {
+		key: details.get(key)
+		for key in (
+			"item_code",
+			"item_name",
+			"uom",
+			"price_list_rate",
+			"resolved_barcode_type",
+			"resolved_qty",
+			"resolved_uom",
+			"resolved_rate",
+			"resolved_price",
+			"resolved_amount",
+		)
+	}
+	return result
 
 
 @frappe.whitelist()
@@ -1209,7 +1314,7 @@ def get_items(
 	try:
 		pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
 
-		# Try to resolve weighted/priced barcodes if barcode_resolver is available
+		# Try to resolve weighted/priced barcodes (POS Barcode Rules, then barcode_resolver)
 		resolved_barcode_data = None
 		effective_search_term = search_term
 		if search_term and len(search_term.strip().split()) == 1:
@@ -1530,12 +1635,16 @@ def get_items(
 
 		# Apply resolved barcode data (weighted/priced) to the first matching item
 		if resolved_barcode_data and items:
-			from pos_next.services.barcode import compute_resolved_item_data
+			from pos_next.services.barcode import BarcodeResolutionError, compute_resolved_item_data
 
-			resolved_item_data = compute_resolved_item_data(
-				resolved_barcode_data,
-				item=items[0],
-			)
+			try:
+				resolved_item_data = compute_resolved_item_data(
+					resolved_barcode_data,
+					item=items[0],
+				)
+			except BarcodeResolutionError:
+				# Searching shouldn't fail; the scan path reports why it can't be sold.
+				resolved_item_data = None
 			if resolved_item_data:
 				items[0].update(resolved_item_data)
 
